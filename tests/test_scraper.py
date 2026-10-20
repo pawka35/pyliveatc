@@ -1,6 +1,8 @@
 import pytest
 from pyliveatc.scraper import (
+    fetch_feedindex,
     get_stream_url,
+    parse_feedindex_geo_links,
     parse_feedindex_html,
     parse_search_html,
     parse_topfeeds_html,
@@ -42,12 +44,101 @@ def test_parse_topfeeds(topfeeds_html):
     assert feeds[2].up is False
 
 
-def test_parse_feedindex_same_as_search(search_kjfk_html):
-    # feedindex uses same HTML structure as search
-    from pyliveatc.scraper import parse_feedindex_html
+def test_parse_feedindex_legacy_same_as_search(search_kjfk_html):
+    # Older feedindex pages shared the search page's table.body layout.
     feeds = parse_feedindex_html(search_kjfk_html)
     assert len(feeds) == 3
     assert any(f.mount_id == "kjfk_gnd_twr" for f in feeds)
+
+
+def test_parse_feedindex_modern_list(feedindex_class_b_ca_html):
+    """Current feedindex list rows use myDirectStream + archive links,
+    not table.body / freqTable."""
+    feeds = parse_feedindex_html(feedindex_class_b_ca_html)
+    assert len(feeds) == 3
+
+    east = next(f for f in feeds if f.mount_id == "kpoc2_klax_app_east_feeder")
+    assert east.up is True
+    assert east.icao == "KLAX"
+    assert "East Feeder" in east.title
+    assert len(east.frequencies) == 1
+    assert east.frequencies[0].frequency == "124.050"
+
+    klax7 = next(f for f in feeds if f.mount_id == "klax7")
+    assert klax7.icao == "KLAX"
+    assert len(klax7.frequencies) == 3
+    assert {fr.frequency for fr in klax7.frequencies} == {
+        "124.500", "124.300", "125.200",
+    }
+
+
+def test_parse_feedindex_geo_links_states(feedindex_geo_states_html):
+    links = parse_feedindex_geo_links(feedindex_geo_states_html)
+    assert len(links) >= 5
+    assert all(p.get("type") == "class-b" for p in links)
+    assert any(p.get("state") == "California" for p in links)
+    assert any(p.get("state") == "District of Columbia" for p in links)
+    # Selector pages have no feed rows.
+    assert parse_feedindex_html(feedindex_geo_states_html) == []
+
+
+def test_parse_feedindex_geo_links_provinces(feedindex_geo_provinces_html):
+    links = parse_feedindex_geo_links(feedindex_geo_provinces_html)
+    assert any(p.get("province") == "Alberta" for p in links)
+    assert any(p.get("type") == "canada" for p in links)
+
+
+def test_fetch_feedindex_crawls_geo_pages(feedindex_geo_states_html,
+                                          feedindex_class_b_ca_html):
+    """fetch_feedindex must follow state/province/center selector links."""
+    calls = []
+
+    class _StubTransport:
+        def get_text(self, path, params=None, **kwargs):
+            assert path == "/feedindex.php"
+            calls.append(dict(params or {}))
+            if params == {"type": "class-b"}:
+                return feedindex_geo_states_html
+            if params and params.get("state") == "California":
+                return feedindex_class_b_ca_html
+            # Other states: empty list page
+            return "<html><body>no feeds</body></html>"
+
+    feeds = fetch_feedindex("class-b", transport=_StubTransport())
+    assert calls[0] == {"type": "class-b"}
+    assert any(c.get("state") == "California" for c in calls[1:])
+    assert len(feeds) == 3
+    assert {f.mount_id for f in feeds} >= {
+        "kpoc2_klax_app_east_feeder", "klax7",
+    }
+
+
+def test_fetch_feedindex_parallel_workers(feedindex_geo_states_html,
+                                          feedindex_class_b_ca_html):
+    """workers>1 must still crawl every geo page and dedupe feeds."""
+    import threading
+
+    lock = threading.Lock()
+    calls = []
+
+    class _StubTransport:
+        def get_text(self, path, params=None, **kwargs):
+            assert path == "/feedindex.php"
+            with lock:
+                calls.append(dict(params or {}))
+            if params == {"type": "class-b"}:
+                return feedindex_geo_states_html
+            if params and params.get("state") == "California":
+                return feedindex_class_b_ca_html
+            return "<html><body>no feeds</body></html>"
+
+    feeds = fetch_feedindex("class-b", transport=_StubTransport(), workers=4)
+    assert any(c == {"type": "class-b"} for c in calls)
+    assert sum(1 for c in calls if "state" in c) >= 5
+    assert len(feeds) == 3
+    assert {f.mount_id for f in feeds} >= {
+        "kpoc2_klax_app_east_feeder", "klax7",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +225,9 @@ def test_get_stream_url_live(hlisten_kjfk_gnd_live_html):
             return hlisten_kjfk_gnd_live_html
 
     url = get_stream_url("kjfk_gnd", icao="kjfk", transport=_StubTransport())
-    assert url == "https://s1-bos.liveatc.net/kjfk_gnd"
+    assert url == (
+        "https://s1-bos.liveatc.net/kjfk_gnd?nocache=2025020820382877508"
+    )
 
 
 def test_get_stream_url_malformed_page_returns_none():
