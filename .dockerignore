@@ -1,0 +1,17 @@
+.git
+.github
+.idea
+.venv
+**/__pycache__
+**/*.pyc
+**/*.egg-info
+.pytest_cache
+.mypy_cache
+data
+examples/data
+examples/airports.json
+examples/__pycache__
+tests
+*.mp3
+*.log
+agent-transcripts

@@ -1,1 +1,11 @@
-*.pyc\n__pycache__/\n*.egg-info/\n.pytest_cache/\ndist/\nbuild/
+*.pyc
+__pycache__/
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+.idea/
+data/*
+!data/.gitkeep
+examples/airports.json
+examples/data/

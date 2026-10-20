@@ -45,6 +45,16 @@ python -m pyliveatc download kjfk_app --date 20260609 --hours 12 --dest ./audio
 python -m pyliveatc dataset --out ./data --types class-b
 ```
 
+## Docker (airport catalog + FlareSolverr)
+
+```bash
+docker compose up -d flaresolverr
+docker compose build catalog
+docker compose run --rm catalog   # writes ./data/airports.json
+```
+
+Schedule twice daily with host cron — see [docs/usage.md](docs/usage.md#docker-flaresolverr--airport-catalog).
+
 ## Docs
 
 See [`docs/`](docs/) for the full API reference, usage examples, architecture notes, and dataset documentation.

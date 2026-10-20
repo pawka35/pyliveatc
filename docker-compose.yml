@@ -1,0 +1,45 @@
+# FlareSolverr stays up; catalog is a one-shot job that writes ./data/airports.json.
+#
+# Start CF solver (always-on):
+#   docker compose up -d flaresolverr
+#
+# Build + run catalog once:
+#   docker compose run --rm catalog
+#
+# Host cron (twice daily), from this directory:
+#   0 3,15 * * * cd /opt/pyliveatc && docker compose run --rm catalog >> /var/log/pyliveatc-catalog.log 2>&1
+
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: pyliveatc-flaresolverr
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-UTC}
+    # Do NOT publish 8191 to the internet — keep it on the compose network only.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8191/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  catalog:
+    build: .
+    image: pyliveatc-catalog:local
+    container_name: pyliveatc-catalog
+    depends_on:
+      flaresolverr:
+        condition: service_healthy
+    environment:
+      PYLIVEATC_MODE: flaresolverr
+      PYLIVEATC_FLARESOLVERR: http://flaresolverr:8191
+      # Optional: PYLIVEATC_DELAY=1.5
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/data
+    # One-shot job — do not restart; use `docker compose run --rm catalog`.
+    restart: "no"
+    profiles:
+      - job

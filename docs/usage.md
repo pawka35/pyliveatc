@@ -105,5 +105,44 @@ t.close()
 | `PYLIVEATC_DELAY` | `1.5` | Seconds between requests |
 | `PYLIVEATC_FLARESOLVERR` | `http://localhost:8191` | FlareSolverr URL (without trailing `/v1`) |
 
+## Docker: FlareSolverr + airport catalog
+
+LiveATC needs FlareSolverr. The repo ships a Compose stack:
+
+- **flaresolverr** — always-on Chromium solver (internal network only, no published ports)
+- **catalog** — one-shot job that writes `./data/airports.json` via `examples/build_airport_catalog.py`
+
+```bash
+# always-on CF solver
+docker compose up -d flaresolverr
+
+# build worker image (once / after code changes)
+docker compose build catalog
+
+# run catalog once → ./data/airports.json
+docker compose run --rm catalog
+```
+
+Twice daily on the **host** (crontab), from the project directory:
+
+```cron
+0 3,15 * * * cd /opt/pyliveatc && docker compose run --rm catalog >> /var/log/pyliveatc-catalog.log 2>&1
+```
+
+Manual CLI inside the same image (still needs flaresolverr up):
+
+```bash
+docker compose run --rm catalog \
+  python -m pyliveatc feedindex --type hf
+```
+
+Notes:
+
+- Output lands on the host at `./data/airports.json` (bind mount).
+- Do not publish FlareSolverr `:8191` to the internet.
+- Full catalog + stream URL resolve can take a long time and needs ~1–1.5 GB RAM for FlareSolverr.
+- Lower workers if CF rate-limits: edit the `CMD` in `Dockerfile` or override:
+  `docker compose run --rm catalog python /app/examples/build_airport_catalog.py --out /data/airports.json --workers 2`
+
 ---
 [← API](api.md) · [Home](README.md) · [Architecture →](architecture.md)
