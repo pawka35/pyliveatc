@@ -10,11 +10,12 @@ Usage::
     counts = export_all("./liveatc_data", feed_types=["class-b", "international-eu"])
 """
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from .models import ArchiveFile, Feed, TopFeed
-from .scraper import FEED_TYPES, fetch_feedindex, fetch_topfeeds
+from .scraper import FEED_INDEX_TYPES, fetch_feedindex, fetch_topfeeds
 from .transport import Transport, default_transport
 
 CONFIGS = ("feeds", "archives", "topfeeds")
@@ -82,26 +83,53 @@ def export_topfeeds_jsonl(topfeeds: Iterable[TopFeed], path: str) -> int:
 def export_all(out_dir: str,
                feed_types: Optional[List[str]] = None,
                transport: Optional[Transport] = None,
-               include_topfeeds: bool = True) -> Dict[str, int]:
+               include_topfeeds: bool = True,
+               workers: int = 1) -> Dict[str, int]:
     """Crawl feed index and top feeds; write JSONL files + manifest.
+
+    ``workers`` > 1 parallelizes feedindex page fetches (see
+    :func:`pyliveatc.scraper.fetch_feedindex`).
 
     Returns dict of {filename: row_count}.
     """
     t = transport or default_transport()
-    types = feed_types or FEED_TYPES
+    # Skip the browse landing page ``all`` — it has no feeds and would
+    # collide with the combined feeds_all.jsonl written below.
+    types = feed_types or FEED_INDEX_TYPES
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     counts: Dict[str, int] = {}
 
-    # Per-type feed files
+    # Per-type feed files. With workers>1 crawl types concurrently so one
+    # shared CF clearance warms the curl_cffi fast path for every category.
+    def _fetch_type(feed_type: str) -> Tuple[str, List[Feed]]:
+        try:
+            # Split the worker budget across concurrent types.
+            type_workers = workers
+            if workers > 1 and len(types) > 1:
+                type_workers = max(1, workers // min(workers, len(types)))
+            return feed_type, fetch_feedindex(
+                feed_type, transport=t, workers=type_workers
+            )
+        except Exception:
+            return feed_type, []
+
+    type_results: List[Tuple[str, List[Feed]]] = []
+    if workers > 1 and len(types) > 1:
+        with ThreadPoolExecutor(max_workers=min(workers, len(types))) as pool:
+            futs = [pool.submit(_fetch_type, ft) for ft in types]
+            for fut in as_completed(futs):
+                type_results.append(fut.result())
+        # Stable order matching `types`
+        by_type = {ft: feeds for ft, feeds in type_results}
+        type_results = [(ft, by_type.get(ft, [])) for ft in types]
+    else:
+        type_results = [_fetch_type(ft) for ft in types]
+
     seen_mounts = set()
     all_feeds: List[Feed] = []
-    for feed_type in types:
-        try:
-            feeds = fetch_feedindex(feed_type, transport=t)
-        except Exception:
-            continue
+    for feed_type, feeds in type_results:
         fname = f"feeds_{feed_type.replace('-', '_')}.jsonl"
         n = export_feeds_jsonl(feeds, str(out / fname))
         counts[fname] = n

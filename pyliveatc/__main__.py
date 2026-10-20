@@ -42,7 +42,7 @@ def cmd_topfeeds(args):
 
 
 def cmd_feedindex(args):
-    feeds = fetch_feedindex(args.type)
+    feeds = fetch_feedindex(args.type, workers=args.workers)
     for feed in feeds:
         status = "UP" if feed.up else "DOWN"
         print(f"[{status}] {feed.title}  mount={feed.mount_id}")
@@ -76,7 +76,7 @@ def cmd_download(args):
 
 def cmd_dataset(args):
     types = args.types or None
-    counts = export_all(out_dir=args.out, feed_types=types)
+    counts = export_all(out_dir=args.out, feed_types=types, workers=args.workers)
     for fname, n in counts.items():
         print(f"  {fname}: {n} rows")
     print(f"\nOutput: {args.out}")
@@ -94,6 +94,8 @@ def main():
 
     p_fi = sub.add_parser("feedindex", help="List feeds by category")
     p_fi.add_argument("--type", default="all", choices=FEED_TYPES)
+    p_fi.add_argument("--workers", type=int, default=1,
+                      help="Parallel feedindex page fetches (default: 1)")
 
     p_arch = sub.add_parser("archive", help="List archive files for a mount")
     p_arch.add_argument("mount_id")
@@ -109,6 +111,8 @@ def main():
     p_ds = sub.add_parser("dataset", help="Export feeds to JSONL dataset")
     p_ds.add_argument("--out", default="./liveatc_data")
     p_ds.add_argument("--types", nargs="+", choices=FEED_TYPES)
+    p_ds.add_argument("--workers", type=int, default=1,
+                      help="Parallel feedindex page fetches (default: 1)")
 
     args = parser.parse_args()
     if not args.cmd:

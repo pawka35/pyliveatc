@@ -37,3 +37,18 @@ def archive_kjfk_gnd_live_html():
 @pytest.fixture
 def hlisten_kjfk_gnd_live_html():
     return (FIXTURES / "hlisten_kjfk_gnd_live.html").read_text()
+
+
+@pytest.fixture
+def feedindex_class_b_ca_html():
+    return (FIXTURES / "feedindex_class_b_ca.html").read_text()
+
+
+@pytest.fixture
+def feedindex_geo_states_html():
+    return (FIXTURES / "feedindex_geo_states.html").read_text()
+
+
+@pytest.fixture
+def feedindex_geo_provinces_html():
+    return (FIXTURES / "feedindex_geo_provinces.html").read_text()
