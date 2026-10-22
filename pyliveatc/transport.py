@@ -207,11 +207,20 @@ class Transport:
         resp = requests.post(
             f"{endpoint}/v1", json=payload, timeout=timeout_ms / 1000 + 30
         )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("status") != "ok":
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+        # FlareSolverr often returns HTTP 500 with a JSON ``message`` body —
+        # surface that instead of a bare HTTPError.
+        if resp.status_code >= 400 or data.get("status") != "ok":
+            detail = (
+                (data.get("message") if isinstance(data, dict) else None)
+                or resp.text[:500]
+                or resp.reason
+            )
             raise RuntimeError(
-                f"FlareSolverr error: {data.get('message') or data.get('status')}"
+                f"FlareSolverr HTTP {resp.status_code} for {url}: {detail}"
             )
         solution = data.get("solution") or {}
         html = solution.get("response") or ""
