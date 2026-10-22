@@ -275,12 +275,25 @@ class Transport:
 
         raise RuntimeError("Cloudflare challenge served")
 
+    def _cf_hint(self) -> str:
+        return (
+            "Cloudflare challenge served. Scraping LiveATC needs FlareSolverr — "
+            f"set PYLIVEATC_MODE=flaresolverr (current mode={self._mode!r}) and "
+            f"ensure a solver is reachable at {self._flaresolverr_url} "
+            "(e.g. `docker compose up -d flaresolverr`)."
+        )
+
     def get(self, path: str, params=None, base: str = BASE_URL, **kwargs):
         url = base + path if path.startswith("/") else path
         if self._mode == "flaresolverr":
             return self._get_flaresolverr_reusing(url, params=params, **kwargs)
         _throttle()
-        return self.session.get(url, params=params, **kwargs)
+        try:
+            return self.session.get(url, params=params, **kwargs)
+        except RuntimeError as e:
+            if "Cloudflare challenge" in str(e):
+                raise RuntimeError(self._cf_hint()) from e
+            raise
 
     def get_text(self, path: str, params=None, base: str = BASE_URL, **kwargs) -> str:
         r = self.get(path, params=params, base=base, **kwargs)
@@ -293,7 +306,12 @@ class Transport:
             r.raise_for_status()
             return r.content
         _throttle()
-        r = self.session.get(url, **kwargs)
+        try:
+            r = self.session.get(url, **kwargs)
+        except RuntimeError as e:
+            if "Cloudflare challenge" in str(e):
+                raise RuntimeError(self._cf_hint()) from e
+            raise
         r.raise_for_status()
         return r.content
 
